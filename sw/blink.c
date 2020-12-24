@@ -220,12 +220,12 @@ void main (void)
         rim
     __endasm;
 
-	printf ("Hello, world!\n\r");
+	printf ("\n\r\n\rHello, world!\n\r");
 
 	rxpkt_state = 0;
 
 	// wait one second
-	putchar ('W');
+	printf ("Waiting one second...\n\r");
 	led_timer = 0;
 	for (;;) {
 		if (flag50) {
@@ -241,7 +241,7 @@ void main (void)
 	putchar ('\r');
 
 	// average 64 measurements to determine resting distance
-	putchar ('A');
+	printf ("Measuring resting distance...\n\r");
 	led_timer = 0;
 	distances = 0;
 	for (;;) {
@@ -252,7 +252,7 @@ void main (void)
 				distance = ConvertToDistance ();
 				distances += distance;
 				led_timer++;
-				putchar ('.');
+				printf ("%4d ", distance);
 				if (led_timer == 64) {
 					led_timer = 0;
 					restingDistance = distances >> 6;
@@ -325,11 +325,10 @@ void main (void)
 					}
 				}
 			} else if (panic >= 2) {
-				// 4 seconds minimum between triggers
+				// 2 seconds minimum between triggers
 				panicPhase++;
-				if (panicPhase == 200) {
+				if (panicPhase == 100) {
 					panic = 0;
-					printf ("R\n\r");
 				}
 			}
 		}
