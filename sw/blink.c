@@ -1,3 +1,8 @@
+// This code is for the STM8S208RBT6 Nucleo-64 board.
+// Connect servo to PD4 / CN9-6
+// Connect ultrasonic sensor to PD6 / CN9-37
+// User LED on PE4
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
