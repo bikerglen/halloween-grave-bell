@@ -1,7 +1,8 @@
 // This code is for the STM8S208RBT6 Nucleo-64 board.
 // Connect servo to PD4 / CN9-6
 // Connect ultrasonic sensor to PD6 / CN9-37
-// User LED on PE4
+// User LED 1 on PG1
+// User LED 2 on PG0
 
 #include <stdint.h>
 #include <stdio.h>
@@ -124,10 +125,6 @@ uint8_t rxpkt_state;
 uint8_t rxpkt_count;
 uint8_t rxpkt_buffer[8];
 
-uint8_t panic = 0;
-uint8_t panicCount = 0;
-uint8_t panicPhase = 0;
-
 uint16_t distance;
 uint16_t restingDistance;
 uint16_t triggerDistance;
@@ -139,6 +136,11 @@ void main (void)
 
 	// timer for blinking LED
 	uint8_t led_timer = 0;
+
+	// bell clang state
+	uint8_t panic = 0;
+	uint8_t panicCount = 0;
+	uint8_t panicPhase = 0;
 
 	// set clock to internal 16 MHz oscillator
 	CLK_DIVR = 0x00;
@@ -162,29 +164,41 @@ void main (void)
 	USART3_BRR2 = 0x03; // 9600 baud
 	USART3_BRR1 = 0x68;
 
+	// configure port a, all outputs except PA4 which is input with pull-up
+	PA_ODR = 0xEF; // all high except PA4
+    PA_DDR = 0xEF; // outputs except PA4 is input
+	PA_CR1 = 0xFF; // push pull with pull up on PA4
+	PA_CR2 = 0x00; // normal speed, no interrupt on PA4
+
 	// configure port b as push-pull outputs
 	PB_ODR = 0xFF; // all high
     PB_DDR = 0xFF; // all outputs
 	PB_CR1 = 0xFF; // all totem pole
 	PB_CR2 = 0x00; // all normal speed
 
-	// configure port c as push-pull outputs, bit 5 is user led
-	PC_ODR = 0xDF; // all high except led
-    PC_DDR = 0xFF; // all outputs
-	PC_CR1 = 0xFF; // all totem pole
-	PC_CR2 = 0x00; // all normal speed
+	// configure port c as push-pull outputs except PC6 which is input with pull-up
+	PC_ODR = 0xBF; // all high except PC6
+    PC_DDR = 0xBF; // all outputs except PC6
+	PC_CR1 = 0xFF; // all totem pole with pull up on PC6
+	PC_CR2 = 0x00; // all normal speed, no interrupt on PC6
 
 	// configure port d as push-pull outputs, PD6 as floating input without interrupt
-	PD_ODR = 0xBF; // all high
-	PD_DDR = 0xBF; // all outputs
-	PD_CR1 = 0xBF; // all totem pole
+	PD_ODR = 0xBF; // all high except PD6
+	PD_DDR = 0xBF; // all outputs except PD6
+	PD_CR1 = 0xFF; // all totem pole with pull up PD6
 	PD_CR2 = 0x00; // all normal speed
 
-	// configure port e as push-pull outputs, PE4 as floating input without interrupt
-	PE_ODR = 0xFF; // all high except PE4
-	PE_DDR = 0xEF; // all outputs except PE4 which is input
-	PE_CR1 = 0xEF; // all totem pole except PE4 which is floating
+	// configure port e as push-pull outputs, PE1, PE2  as floating input without interrupt
+	PE_ODR = 0xF9; // all high except PE1, PE2
+	PE_DDR = 0xF9; // all outputs except PE1, PE2 which are inputs
+	PE_CR1 = 0xFF; // all totem pole with pull ups on PE1 and PE2
 	PE_CR2 = 0x00; // all normal speed except PE4 which has no interrupt
+
+    // port g bits 1:0 are LED 1 and 2, rest are unused, configure all as push pull
+    PG_ODR = 0xff;
+    PG_DDR = 0xff;
+    PG_CR1 = 0xff;
+    PG_CR2 = 0x00;
 
 
 	//----------------------------------------
@@ -249,11 +263,13 @@ void main (void)
 	printf ("Measuring resting distance...\n\r");
 	led_timer = 0;
 	distances = 0;
+	PG_ODR &= ~GPIO_PIN_0;
 	for (;;) {
 		if (USART3_SR & USART_SR_RXNE) {
 			data = USART3_DR;
 			result = GetMeasurement (data);
 			if (result) {
+				PG_ODR ^= GPIO_PIN_0;
 				distance = ConvertToDistance ();
 				distances += distance;
 				led_timer++;
@@ -271,6 +287,7 @@ void main (void)
 	putchar ('\r');
 	printf ("resting distance = %d millimeters\n\r", restingDistance);
 	printf ("trigger distance = %d millimeters\n\r", triggerDistance);
+	PG_ODR |= GPIO_PIN_0;
 
 	// main loop
 	for (;;) {
@@ -280,12 +297,15 @@ void main (void)
 			result = GetMeasurement (data);
 			if (result) {
 				distance = ConvertToDistance ();
+				// printf ("D: %d\n\r", distance);
 				if ((panic == 0) && (distance <= triggerDistance)) {
 					printf ("T: %d\n\r", distance);
 					panic = 1;
 					panicCount = 0;
 					panicPhase = 0;
 					clanger_Prepare ();
+					PG_ODR &= ~GPIO_PIN_0;
+					PC_ODR &= ~GPIO_PIN_7;
 				}
 			}
 		}
@@ -295,10 +315,10 @@ void main (void)
 
 			if (led_timer == 0) {
 				// turn off user 1 led
-				PC_ODR &= ~GPIO_PIN_5;
+				PG_ODR |= GPIO_PIN_1;
 			} else if (led_timer == 45) {
 				// turn on user 1 led
-				PC_ODR |= GPIO_PIN_5;
+				PG_ODR &= ~GPIO_PIN_1;
 			}
 			led_timer++;
 			if (led_timer == 50) {
@@ -306,11 +326,14 @@ void main (void)
 			}
 
 			if (panic == 0) {
-				if (!(PE_IDR & GPIO_PIN_4)) {
+				// press SW1 or place voltage on BIG_INPUT to trigger immediately
+				if ((!(PE_IDR & GPIO_PIN_1)) || (!(PC_IDR & GPIO_PIN_6))) {
 					panic = 1;
 					panicCount = 0;
 					panicPhase = 0;
 					clanger_Prepare ();
+					PG_ODR &= ~GPIO_PIN_0;
+					PC_ODR &= ~GPIO_PIN_7;
 				}
 			} else if (panic == 1) {
 				if ((panicCount == 9) && (panicPhase == 15)) {
@@ -334,6 +357,8 @@ void main (void)
 				panicPhase++;
 				if (panicPhase == 100) {
 					panic = 0;
+					PG_ODR |= GPIO_PIN_0;
+					PC_ODR |= GPIO_PIN_7;
 				}
 			}
 		}
@@ -419,4 +444,6 @@ uint16_t ConvertToDistance (void)
 		d *= 10;
 		d += rxpkt_buffer[i] - '0';
 	}
+
+	return d;
 }
